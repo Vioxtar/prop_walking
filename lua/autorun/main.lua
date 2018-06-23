@@ -30,7 +30,7 @@ Only cover certain grounds (current valid physics props)
 ---------------------------------------------------------------------------]]
 local function ShouldCoverGround(ground)
 	-- Check the ground
-	if !IsValid(ground) then return false end
+	if not IsValid(ground) then return false end
 	if ground:GetClass() != "prop_physics" then return false end
 	return true
 end
@@ -42,7 +42,7 @@ local function ShouldServePlayer(ply)
 	-- Check the player
 	if ply.m_bWasNoclipping then return false end
 	if ply:InVehicle() then return false end
-	if !ply:Alive() then return false end
+	if not ply:Alive() then return false end
 	return true
 end
 
@@ -74,7 +74,7 @@ hook.Add("PlayerTick", "PropWalk", function(ply, mv)
 	if tr0.Hit and ShouldCoverGround(ground) and ShouldServePlayer(ply) and goodSlope then -- We're above a ground
 		local pw = ground:GetNW2Entity("PropWalker")
 		
-		if !IsValid(pw) then
+		if not IsValid(pw) then
 			-- The ground is uncovered, create a new prop walker
 			if SERVER then
 				pw = ents.Create("prop_walker")
@@ -141,7 +141,7 @@ hook.Add("PlayerTick", "PropWalk", function(ply, mv)
 				maxs = maxs,
 				mask = MASK_PLAYERSOLID
 			}
-			if !tr2.Hit then -- We won't be stuck, set the player's new origin
+			if not tr2.Hit then -- We won't be stuck, set the player's new origin
 				mv:SetOrigin(nextOrigin)
 			end
 
