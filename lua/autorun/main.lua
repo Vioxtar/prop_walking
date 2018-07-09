@@ -4,9 +4,9 @@
  - Each prop (called ground) has its own prop walker. It's created whenever a player makes contact with a new ground,
 and is removed after 10 minutes of being inactive (unstepped on by players) for optimization purposes.
 
-- The per ground approach is preferred (rather than a per-player approach) to allow smooth transitions between grounds.
+ - The per ground approach is preferred (rather than a per-player approach) to allow smooth transitions between grounds.
 
- - A prop walker is parented to its ground, and always shares its ground's physcollides, position and angles.
+ - A prop walker is parented to its ground, and always shares its ground's physcollides, position and angles client and server side.
 
 TODO:
 	Crucial:
@@ -21,12 +21,12 @@ TODO:
 
 	Optional:
 		Simulate player weight on original ground
-		Tweak player velocity on leave to match ground's
+		Tweak player velocity to match ground's during dismounts
 		Resolve more player stuck cases
 ---------------------------------------------------------------------------]]
 
 --[[-------------------------------------------------------------------------
-Only cover certain grounds (current valid physics props)
+Only cover certain grounds (currently valid physics props)
 ---------------------------------------------------------------------------]]
 local function ShouldCoverGround(ground)
 	-- Check the ground
@@ -50,9 +50,9 @@ end
 --[[-------------------------------------------------------------------------
 Create & handle prop walkers, tweak player positions
 ---------------------------------------------------------------------------]]
-local maxSlope = 0.707107 -- We can't walk on slopes bigger than this
+local maxSlope = 0.707107 -- We can't walk on slopes bigger than this (excluding 1)
 local turnOnDist = 50 -- Ground coverage turns on when this many units above the ground
-hook.Add("PlayerTick", "PropWalk", function(ply, mv)
+hook.Add("Move", "PropWalk", function(ply, mv)
 
 	-- Check if we have a ground we should cover
 	local mins, maxs = ply:GetCollisionBounds()
@@ -61,7 +61,7 @@ hook.Add("PlayerTick", "PropWalk", function(ply, mv)
 	table.Add(filter, propWalkers)
 	filter[#filter + 1] = ply
 	local tr0 = util.TraceHull{
-		start = mv:GetOrigin() + Vector(0, 0, plyHeight),
+		start = mv:GetOrigin() + Vector(0, 0, plyHeight), -- Trace from up to down
 		endpos = mv:GetOrigin() - Vector(0, 0, turnOnDist),
 		filter = filter,
 		mins = mins,
@@ -71,7 +71,7 @@ hook.Add("PlayerTick", "PropWalk", function(ply, mv)
 
 	local ground = tr0.Entity
 	local goodSlope = tr0.HitNormal.z >= maxSlope or tr0.HitNormal.z == 0
-	if tr0.Hit and ShouldCoverGround(ground) and ShouldServePlayer(ply) and goodSlope then -- We're above a ground
+	if tr0.Hit and ShouldCoverGround(ground) and ShouldServePlayer(ply) and goodSlope then -- We're above a workable ground
 		local pw = ground:GetNW2Entity("PropWalker")
 		
 		if !IsValid(pw) then
@@ -91,90 +91,200 @@ hook.Add("PlayerTick", "PropWalk", function(ply, mv)
 
 		-- We have a valid prop walker, continue
 
-		-- Fix prop walker position & angle networking, and bail on client
+		if SERVER then
+			-- Reset the removal timer
+			pw:RemovalTimer()
+			-- Update the absolute position on the client
+			pw:NetworkAbsPosition()
+
+			-- Set our local prop walker position
+			local lastPW = ply.lastPW
+			local lastPWPos = ply.lastPWPos
+			if lastPWPos and pw == lastPW then
+				mv:SetOrigin(pw:LocalToWorld(lastPWPos))
+			end
+
+		end
+
+		-- Fix prop walker position & angle networking
 		if CLIENT then
 			local netAng = pw:GetNW2Angle("GroundAng")
 			local netPos = pw:GetNW2Vector("GroundPos")
 
 			if netAng then pw:SetAngles(netAng) end
 			if netPos then pw:SetPos(netPos) end
-
-			return -- Only server stuff from here on out
 		end
 
-		if SERVER then
-
-			-- Reset the removal timer
-			pw:RemovalTimer()
-			pw:NetworkAbsPosition()
-
-			local nextOrigin = mv:GetOrigin()
-
-			-- Set our local prop walker position
-			local lastPW = ply.lastPW
-			local lastPWPos = ply.lastPWPos
-			if lastPWPos and pw == lastPW then
-				nextOrigin = pw:LocalToWorld(lastPWPos)
-			end
-
-			-- Find out if we're stuck
-			local tr1 = util.TraceHull{
-				start = nextOrigin + Vector(0, 0, plyHeight),
-				endpos = nextOrigin,
-				filter = {ply, ground},
-				mins = mins,
-				maxs = maxs,
-				mask = MASK_PLAYERSOLID
-			}
-			if tr1.Hit then -- We're stuck, resolve
-				if tr1.Entity == pw and tr1.HitPos.z - mv:GetOrigin().z < 50 then
-					nextOrigin = tr1.HitPos
+		-- Find out if we're stuck & resolve if needed (currently only does vertical unstuck)
+		-- Do this on the client as well to minimize prediction errors
+		local mins, maxs = ply:GetCollisionBounds()
+		local tr1 = util.TraceHull{
+			start = mv:GetOrigin() + Vector(0, 0, plyHeight), -- Trace from up to down
+			endpos = mv:GetOrigin(),
+			filter = {ply, ground},
+			mins = mins,
+			maxs = maxs,
+			mask = MASK_PLAYERSOLID
+		}
+		if tr1.Hit then -- We're stuck, resolve
+			if tr1.Entity == pw or tr1.Entity == ground then
+				if tr1.HitPos.z - mv:GetOrigin().z < 25 then
+					mv:SetOrigin(tr1.HitPos)
 				end
 			end
-
-			-- Set our next position only if we won't be stuck in it
-			local tr2 = util.TraceHull{
-				start = nextOrigin,
-				endpos = nextOrigin,
-				filter = ply,
-				mins = mins,
-				maxs = maxs,
-				mask = MASK_PLAYERSOLID
-			}
-			if !tr2.Hit then -- We won't be stuck, set the player's new origin
-				mv:SetOrigin(nextOrigin)
-			end
-
-			-- Store the last active prop walker for the FinishMove hook
-			ply.lastPW = pw
 		end
+
+		ply.lastPW = pw
 
 	else
 
-		-- No valid prop walker to be worked with, forget & bail
-		
-		if SERVER then
-
-			ply.lastPW = nil
-
+		if IsValid(ply.lastPW) then
+			-- We've left our ground for good, match the player's velocity to the ground's velocity
+			local lastPW = ply.lastPW
+			local ground = lastPW:GetNW2Entity("Ground")
+			if IsValid(ground) then
+				ply:SetVelocity(ground:GetVelocity())
+			end
 		end
+
+		ply.lastPW = nil
 
 	end
 end)
 
 
 --[[-------------------------------------------------------------------------
-Obtain relative ground position to be used in later movement hook (for moving grounds)
+Obtain relative ground position to be used later
 ---------------------------------------------------------------------------]]
 hook.Add("FinishMove", "GetRelativeGroundPosition", function(ply, mv)
-	
-	if CLIENT then return end
 
 	local pw = ply.lastPW
+
+	-- Store post-move origin, used to localize player movement in respect to their moving grounds
 	if IsValid(pw) then
 		ply.lastPWPos = pw:WorldToLocal(mv:GetOrigin())
 	else
 		ply.lastPWPos = nil
 	end
 
+
+	-- Sync again on the client
+	if CLIENT then
+		local ground = nil
+		if IsValid(pw) then ground = pw:GetNW2Entity("Ground") end
+
+		if IsValid(pw) and IsValid(ground) then
+
+			local netAng = pw:GetNW2Angle("GroundAng")
+			local netPos = pw:GetNW2Vector("GroundPos")
+
+			if netAng then
+				pw:SetAngles(netAng)
+				ground:SetAngles(netAng)
+			end
+			if netPos then
+				pw:SetPos(netPos)
+				ground:SetPos(netPos)
+			end
+
+		else
+
+			ply.lastPWPos = nil
+
+		end
+	end
+
 end)
+
+
+--[[-------------------------------------------------------------------------
+Prevent nearby physics damage to the player when on moving grounds
+---------------------------------------------------------------------------]]--
+hook.Add("PlayerShouldTakeDamage", "PreventDamage", function(ply, attacker)
+
+	-- If the attacker doesn't have a physics movetype, bail
+	if attacker:GetMoveType() != 6 then return end
+
+	local pw = ply.lastPW
+	if !IsValid(pw) then return end
+
+	local ground = pw:GetNW2Entity("Ground")
+	if !IsValid(ground) then return end
+
+	local attackVel = attacker:GetVelocity()
+	local ourVel = ground:GetVelocity()
+	local diffVel = attackVel:DistToSqr(ourVel)
+	
+	if diffVel < 9000000 then return false end
+
+end)
+
+
+
+--[[-------------------------------------------------------------------------
+Fix the player's view by preventing stutters on moving grounds
+---------------------------------------------------------------------------]]
+-- hook.Add("CalcView", "PreventViewStutters", function(ply, origin)
+
+-- 	if !IsFirstTimePredicted() then return end
+
+-- 	local pw = ply.lastPW
+-- 	if !IsValid(pw) then return end
+
+-- 	local lastRelPos = ply.lastGroundPos
+-- 	if !lastRelPos then return end
+
+-- 	local ground = pw:GetNW2Entity("Ground")
+-- 	if !IsValid(ground) then return end
+
+-- 	local oldView = ply:EyePos()
+-- 	local currView = ground:LocalToWorld(lastRelPos)
+
+-- 	local zDiff = oldView.z - currView.z
+
+-- 	local view = {}
+
+-- 	local newOrigin = currView + Vector(0, 0, zDiff)
+-- 	view.origin = newOrigin
+
+-- 	return view
+
+-- end)
+
+
+--[[-------------------------------------------------------------------------
+Fix player animations
+---------------------------------------------------------------------------]]
+-- local drawingPly = false -- Avoid infinite loops
+-- hook.Add("PrePlayerDraw", "FixAnimations", function(ply)
+-- 	if drawingPly then return end
+
+-- 	local pw = ply:GetNW2Entity("PropWalker")
+-- 	if !IsValid(pw) or pw == ply then return end -- This means the prop walker should be null, for now
+-- 	local ground = pw:GetNW2Entity("Ground")
+-- 	if !IsValid(ground) then return end
+
+-- 	local groundVel = ground:GetVelocity()
+
+-- 	local moveX = ply:GetPoseParameter("move_x")
+-- 	local moveY = ply:GetPoseParameter("move_y")
+
+-- 	ply:SetPoseParameter("move_x", 1)
+-- 	ply:SetPoseParameter("move_y", 1)
+-- 	ply:InvalidateBoneCache()
+
+-- 	drawingPly = true
+-- 		ply:DrawModel()
+-- 		ply:GetActiveWeapon():InvalidateBoneCache()
+-- 		ply:GetActiveWeapon():DrawModel()
+-- 	drawingPly = false
+
+-- 	return true
+-- end)
+
+
+
+-- BOT DEBUG
+-- hook.Add("PhysgunPickup", "HelpWithBots", function(ply, ent)
+-- 	if ent:IsPlayer() then return true end
+-- end)

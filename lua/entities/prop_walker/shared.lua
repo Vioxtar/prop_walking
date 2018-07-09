@@ -3,11 +3,11 @@ AddCSLuaFile()
 DEFINE_BASECLASS("base_anim")
 
 --[[-------------------------------------------------------------------------
-Removal the prop walker after 10 minutes of inactivity
+Removal the prop walker after 2 minutes of inactivity
 ---------------------------------------------------------------------------]]
 function ENT:RemovalTimer()
 	if CLIENT then return end
-	timer.Adjust("pwRemove"..self:EntIndex(), 600, 1, function()
+	timer.Adjust("pwRemove"..self:EntIndex(), 120, 1, function()
 		if IsValid(self) then self:Remove() end
 	end)
 end
@@ -18,6 +18,18 @@ propWalkers = {}
 local function HandleRemoval(pw)
 	propWalkers[pw] = nil
 end
+
+-- function ENT:StartTouch(ent)
+
+-- end
+
+-- function ENT:Touch(ent)
+
+-- end
+
+-- function ENT:EndTouch(ent)
+
+-- end
 
 
 --[[-------------------------------------------------------------------------
@@ -53,7 +65,6 @@ function ENT:Initialize()
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetCollisionGroup(COLLISION_GROUP_NONE)
 	self:EnableCustomCollisions(true)
-
 	
 	if SERVER then
 		-- Network our abs position as soon as possible for smooth player mounts
@@ -61,6 +72,9 @@ function ENT:Initialize()
 
 		-- Start a self removal timer in case of inactivity
 		self:RemovalTimer()
+
+		-- We want to use touch hooks to determine ground collision groups
+		-- self:SetTrigger(true)
 	end
 	
 end
@@ -135,6 +149,13 @@ function ENT:NetworkAbsPosition()
 	if !currAng or currAng != newAng then
 		self:SetNW2Angle("GroundAng", newAng)
 	end
+end
+
+--[[-------------------------------------------------------------------------
+Walked on or not, we also wish to network the absolute position whenever it changes
+---------------------------------------------------------------------------]]
+function ENT:CalcAbsolutePosition()
+	self:NetworkAbsPosition()
 end
 
 
