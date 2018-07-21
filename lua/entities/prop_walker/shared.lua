@@ -19,18 +19,6 @@ local function HandleRemoval(pw)
 	propWalkers[pw] = nil
 end
 
--- function ENT:StartTouch(ent)
-
--- end
-
--- function ENT:Touch(ent)
-
--- end
-
--- function ENT:EndTouch(ent)
-
--- end
-
 
 --[[-------------------------------------------------------------------------
 Init the prop walker and cover the ground
@@ -50,7 +38,9 @@ function ENT:Initialize()
 	self:SetModel(ground:GetModel())
 	self:SetParent(ground)
 	ground:SetNW2Entity("PropWalker", self)
-	ground:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR) -- This is a temporary solution
+
+	-- Set our original ground entity to collide with everything but the player himself
+	ground:SetCollisionGroup(COLLISION_GROUP_PASSABLE_DOOR)
 
 	-- Add the new prop walker to the table of prop walkers for quicker filtering in collision traces
 	propWalkers[self] = self
@@ -101,11 +91,15 @@ function ENT:RebuildPhysics(model)
 end
 
 
+
 --[[-------------------------------------------------------------------------
  Handles collisions against traces, includes player movement
 ---------------------------------------------------------------------------]]
-function ENT:TestCollision(startpos, delta, isbox, extents)
+function ENT:TestCollision(startpos, delta, isbox, extents, mask)
 	if !self.PhysCollides then return end
+
+	-- Return nothing if our mask isn't involved with actual player collisions
+	if bit.band(mask, CONTENTS_PLAYERCLIP) == 0 then return end
 
 	-- TraceBox expects the trace to begin at the center of the box, but TestCollision is very quite silly
 	local max = extents
@@ -124,6 +118,7 @@ function ENT:TestCollision(startpos, delta, isbox, extents)
 			Fraction = frac,
 		}
 	end
+
 end
 
 
