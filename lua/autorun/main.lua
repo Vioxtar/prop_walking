@@ -69,7 +69,7 @@ hook.Add( "Move", "PropWalk", function( ply, mv )
 	local mins, maxs = ply:GetCollisionBounds( )
 	local origin = mv:GetOrigin( )
 	local filter = table.Copy( propWalkers )
-	table.insert( filter, ply, 1 ) --Insert the player into the first slot of our trace filter
+	table.insert( filter, 1, ply ) --Insert the player into the first slot of our trace filter
 
 	plyHeight.z = ( maxs.z - mins.z )
 

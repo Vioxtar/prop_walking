@@ -18,7 +18,7 @@ propWalkers = propWalkers or {}
 
 local function HandleRemoval( pw )
 
-	timer.Remove( "pwRemove_".. self:EntIndex( ) )
+	timer.Remove( "pwRemove_".. pw:EntIndex( ) )
 
 	table.remove( propWalkers, pw.PWIndex )
 
@@ -142,9 +142,9 @@ end
 --[[-------------------------------------------------------------------------
 Network position and angle to the client to overcome engine inaccuracies
 ---------------------------------------------------------------------------]]
-function ENT:NetworkAbsPosition( )
+function ENT:NetworkAbsPosition( pos, ang )
 
-	if CLIENT then return end
+	if CLIENT then return pos, ang end
 
 	local ground = self:GetNW2Entity( "Ground" )
 	if !IsValid( ground ) then return end
