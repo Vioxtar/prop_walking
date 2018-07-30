@@ -62,14 +62,16 @@ Create & handle prop walkers, tweak player positions
 ---------------------------------------------------------------------------]]
 local maxSlope = 0.707107 -- We can't walk on slopes bigger than this ( excluding 1 )
 local turnOnDist = Vector( 0, 0, 50 ) -- Ground coverage turns on when this many units above the ground
+local plyHeight = Vector( )
 hook.Add( "Move", "PropWalk", function( ply, mv )
 
 	-- Check if we have a ground we should cover
 	local mins, maxs = ply:GetCollisionBounds( )
-	local plyHeight = Vector( 0, 0, ( maxs.z - mins.z ) )
 	local origin = mv:GetOrigin( )
 	local filter = table.Copy( propWalkers )
 	table.insert( filter, ply, 1 ) --Insert the player into the first slot of our trace filter
+
+	plyHeight.z = ( maxs.z - mins.z )
 
 	local tr0 = util.TraceHull{
 
@@ -104,7 +106,6 @@ hook.Add( "Move", "PropWalk", function( ply, mv )
 			return -- Wait for the next iteration
 
 		end
-
 		-- We have a valid prop walker, continue
 
 		if SERVER then
